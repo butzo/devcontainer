@@ -200,6 +200,12 @@ selections) comes from the host and bypasses the container.
   a file in it.
 - VS Code does not run the justfile: no config staging, no `_guard`. The masks
   and overlays in devcontainer.json still apply.
+- The Bash sandbox write-protects Claude Code's config paths and creates a
+  placeholder for any that is missing, which fails inside the read-only
+  `.claude` overlay (`Can't create file .../.claude/skills: Read-only file
+  system`). post-create adds the workspace `.claude` to
+  `sandbox.filesystem.denyWrite` in the container's user settings, so the
+  sandbox skips those paths instead. Only when the overlay is enabled.
 - bwrap inside podman needs nested unprivileged user namespaces;
   post-create reports whether it works. The fix is a custom seccomp profile;
   to test, add `--security-opt seccomp=unconfined` to `runArgs`.

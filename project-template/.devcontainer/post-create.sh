@@ -45,13 +45,60 @@ EOF
   echo "post-create: seeded ~/.claude from /claude-seed (allowlisted, disposable)"
 fi
 
+# --- Claude Code sandbox: container-local adjustments ----------------------
+# Both edits land in the container's copy of ~/.claude/settings.json only; the
+# host settings and the project's .claude/settings.json stay untouched.
+workspace=$(cd "$(dirname "$0")/.." && pwd)
+settings="$HOME/.claude/settings.json"
+[ -f "$settings" ] || echo '{}' > "$settings"
+
+# jq <args...> '<filter>' applied in place; non-zero (and untouched) on failure.
+edit_settings() {
+  local tmp
+  tmp=$(mktemp "$HOME/.claude/.settings.XXXXXX")
+  if jq "$@" "$settings" > "$tmp"; then mv "$tmp" "$settings"; else rm -f "$tmp"; return 1; fi
+}
+
+# 1. Nested sandbox: inside a container bwrap cannot mount a fresh procfs
+#    ("Can't mount proc on /proc: Operation not permitted"), so every sandboxed
+#    command fails. This upstream flag ("for Docker environments") binds the
+#    existing /proc instead. It is the container's own /proc in the container's
+#    PID namespace, so sandboxed commands see the container's processes rather
+#    than only themselves; the podman boundary is unaffected.
+if edit_settings '.sandbox.enableWeakerNestedSandbox = true'; then
+  echo "post-create: sandbox enableWeakerNestedSandbox = true (nested in a container)"
+else
+  echo "post-create: WARNING — could not set sandbox.enableWeakerNestedSandbox;" \
+       "sandboxed commands will fail to mount /proc" >&2
+fi
+
+# 2. The sandbox write-protects Claude Code's config paths, and for one that
+#    does not exist yet it creates a placeholder to mount over. devcontainer.json
+#    mounts the workspace .claude read-only, so that creation fails with
+#    "Can't create file .../.claude/skills: Read-only file system". Naming the
+#    directory itself in denyWrite makes the sandbox skip its missing children
+#    ("already uncreatable") instead. Absolute path: `./` in user settings would
+#    resolve to ~/.claude, not to the project.
+if findmnt -rno OPTIONS -M "$workspace/.claude" 2>/dev/null | grep -qw ro; then
+  if edit_settings --arg p "$workspace/.claude" \
+      '.sandbox.filesystem.denyWrite = (((.sandbox.filesystem.denyWrite // []) + [$p]) | unique)'; then
+    echo "post-create: sandbox denyWrite += $workspace/.claude (read-only overlay)"
+  else
+    echo "post-create: WARNING — could not add $workspace/.claude to" \
+         "sandbox.filesystem.denyWrite; sandboxed commands will fail" >&2
+  fi
+fi
+
 # --- tealdeer: populate the tldr page cache -------------------------------
 command -v tldr >/dev/null && tldr --update >/dev/null 2>&1 || true
 
 # --- Sanity: verify bwrap can actually sandbox in here --------------------
 if command -v bwrap >/dev/null; then
-  if bwrap --ro-bind / / true 2>/dev/null; then
-    echo "post-create: bwrap OK (nested userns available)"
+  # --proc matters: mounting a fresh procfs is the step that fails when the
+  # container's /proc is not fully visible, and Claude Code's sandbox does it
+  # on every command. A plain --ro-bind probe passes while the sandbox is broken.
+  if bwrap --dev-bind / / --proc /proc true 2>/dev/null; then
+    echo "post-create: bwrap OK (nested userns and /proc mount available)"
   else
     echo "post-create: WARNING — bwrap failed. Claude Code with" \
          "failIfUnavailable=true will refuse to run commands." \
