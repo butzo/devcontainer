@@ -45,6 +45,17 @@ EOF
   echo "post-create: seeded ~/.claude from /claude-seed (allowlisted, disposable)"
 fi
 
+# Auth comes from /run/secrets/claude-oauth-token (see the claude wrapper in
+# the image). A copied .credentials.json (older seeds) shares the host's
+# rotating refresh token and logs host or container out, so drop it.
+if [ -f "$HOME/.claude/.credentials.json" ]; then
+  rm -f "$HOME/.claude/.credentials.json"
+  echo "post-create: removed copied ~/.claude/.credentials.json (use the setup-token file)"
+fi
+if [ ! -r /run/secrets/claude-oauth-token ]; then
+  echo "post-create: NOTE no /run/secrets/claude-oauth-token; run \`claude login\` here or set it up on the host"
+fi
+
 # --- Claude Code sandbox: container-local adjustments ----------------------
 # Both edits land in the container's copy of ~/.claude/settings.json only; the
 # host settings and the project's .claude/settings.json stay untouched.

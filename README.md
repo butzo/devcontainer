@@ -57,10 +57,13 @@ line). Then it verifies the masks and read-only overlays and opens zsh.
 4. **Claude Code config in git** (optional): `git init` in `~/.claude` with
    `snippets/claude-repo.gitignore` as `.gitignore`, so you can `git diff`
    what an agent changed inside a container.
-5. **Auth**: `.credentials.json` comes with the staged config if it exists.
-   Otherwise run `claude login` in each container, or export
-   `ANTHROPIC_API_KEY` on the host and uncomment `remoteEnv` in
-   devcontainer.json.
+5. **Auth**: run `claude setup-token` on the host and save the token to
+   `~/.config/devcontainer/claude-oauth-token` (`chmod 600`). Slot 10 mounts
+   it read-only, and the image's `claude` wrapper exports it as
+   `CLAUDE_CODE_OAUTH_TOKEN`. The token lasts a year and never refreshes.
+   `.credentials.json` is not shared on purpose: its refresh token rotates on
+   every refresh, so copies on host and in containers log each other out.
+   Alternatively, run `claude login` in each container.
 
 The template uses the images at `ghcr.io/butzo/arch-dev`. To build your own,
 see [Your own images](#your-own-images).
@@ -180,7 +183,7 @@ selections) comes from the host and bypasses the container.
 - **Git**: your identity is mounted read-only, so commits work. SSH keys and
   the agent never enter the container; push from the host.
 - **Claude Code config**: `just up` stages an allowlist of host `~/.claude`
-  (`settings.json`, `CLAUDE.md`, `.credentials.json`, agents, commands, hooks,
+  (`settings.json`, `CLAUDE.md`, agents, commands, hooks,
   plugins, rules, skills, `.git`, ...) into `~/.cache/devcontainer/claude-seed`,
   which mounts.env mounts read-only at `/claude-seed`; `post-create.sh` copies
   it into the container. The rest of `~/.claude` (`projects/`, `file-history/`,

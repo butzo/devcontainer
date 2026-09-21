@@ -27,6 +27,19 @@ USER dev
 RUN paru -S --noconfirm --needed claude-code && \
     paru -Scc --noconfirm
 
+# claude wrapper (ahead of /usr/bin in PATH): reads the long-lived token from
+# the mounted host file. Containers never share the host's rotating
+# .credentials.json, whose refresh token dies once any copy refreshes.
+USER root
+RUN printf '%s\n' \
+      '#!/bin/sh' \
+      'f=/run/secrets/claude-oauth-token' \
+      'if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -r "$f" ]; then' \
+      '  CLAUDE_CODE_OAUTH_TOKEN=$(cat "$f"); export CLAUDE_CODE_OAUTH_TOKEN' \
+      'fi' \
+      'exec /usr/bin/claude "$@"' \
+      > /usr/local/bin/claude && chmod 755 /usr/local/bin/claude
+USER dev
 
 # Rust stable toolchain baked into the image (weekly rebuild tracks stable);
 # nightly/targets can still be added ad hoc inside containers via rustup.

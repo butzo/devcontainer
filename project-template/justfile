@@ -10,7 +10,7 @@ mounts_env := "~/.config/devcontainer/mounts.env"
 # mounted at /claude-seed by mounts.env. The rest of ~/.claude (projects/,
 # file-history/, backups/, ...) holds every other project's transcripts.
 seed_dir := "~/.cache/devcontainer/claude-seed"
-seed_allow := ".git .gitignore CLAUDE.md settings.json .credentials.json AGENTS.md plugin.json marketplace.json agents commands ecc hooks plugins rules scripts skills"
+seed_allow := ".git .gitignore CLAUDE.md settings.json AGENTS.md plugin.json marketplace.json agents commands ecc hooks plugins rules scripts skills"
 load :="if [ -f " + mounts_env + " ]; then set -a; . " + mounts_env + "; set +a; else printf '\\033[33mNOTE\\033[0m no " + mounts_env + ", starting without personal mounts\\n' >&2; fi;"
 
 # fails (non-zero) if devcontainer.json lacks a mask or overlay this repo needs,
@@ -42,6 +42,13 @@ _guard:
     if [ -f {{ mounts_env }} ]; then
       if (set -a; . {{ mounts_env }}; env) | grep -E '^DEVC_MOUNT_[0-9]+=' | grep -qE "source=($HOME|~)/\.claude/?(,|$)"; then
         echo "ERROR: {{ mounts_env }} mounts all of ~/.claude; point /claude-seed at {{ seed_dir }}" >&2; exit 1
+      fi
+      # `|| true`: no token slot means grep matches nothing, which pipefail
+      # would otherwise turn into a silent `set -e` exit right here.
+      tok=$(set -a; . {{ mounts_env }}; env | grep -E '^DEVC_MOUNT_[0-9]+=.*target=/run/secrets/claude-oauth-token' \
+        | sed -nE 's/.*source=([^,]+).*/\1/p' | head -n1) || true
+      if [ -n "$tok" ] && [ ! -f "$tok" ]; then
+        echo "ERROR: $tok missing; run \`claude setup-token\` and save the token there (chmod 600)" >&2; exit 1
       fi
     fi
 
