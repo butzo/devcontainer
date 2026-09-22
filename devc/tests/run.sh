@@ -122,5 +122,46 @@ check "no mounts.env: no personal mounts" '[.mounts[] | select(contains("/home/d
 if grep -q "no personal mounts" "$err"; then ok "no mounts.env: NOTE on stderr"
 else bad "no mounts.env: NOTE on stderr" "$(cat "$err")"; fi
 
+# --- _guard: token gate and ~/.claude refusal (devc.just) ----------------------
+# just's shebang recipes need a writable runtime dir.
+export XDG_RUNTIME_DIR="$tmp/rt" DEVC_CACHE="$tmp/cache"
+mkdir -m 700 "$XDG_RUNTIME_DIR"
+w=$(repo guarded)
+tok="$tmp/token"
+# guard_env <mounts.env lines...>: write them as the mounts.env for _guard
+guard_env() { printf '%s\n' "$@" > "$tmp/guard.env"; }
+slot="DEVC_MOUNT_10=type=bind,source=$tok,target=/run/secrets/claude-oauth-token,readonly"
+# guard <name> <pattern>: _guard must fail with <pattern> on stderr; "" = must pass
+guard() {
+  local out rc
+  out=$(cd "$w" && DEVC_MOUNTS_ENV="$tmp/guard.env" just --justfile "$devc_dir/devc.just" _guard 2>&1) && rc=0 || rc=$?
+  if [ -z "$2" ]; then
+    if [ "$rc" -eq 0 ]; then ok "$1"; else bad "$1" "$out"; fi
+  elif [ "$rc" -eq 0 ]; then bad "$1" "exited 0"
+  elif grep -q -- "$2" <<<"$out"; then ok "$1"
+  else bad "$1" "$out"; fi
+}
+
+guard_env 'DEVC_MOUNT_1=type=bind,source=${HOME}/.config/nvim,target=/home/dev/.config/nvim,readonly'
+guard "guard: no token slot refused" "no mount in .* targets /run/secrets/claude-oauth-token"
+guard "guard: no token slot prints the slot line" "echo 'DEVC_MOUNT_10="
+guard_env "$slot"
+guard "guard: missing token file refused" "token file $tok is missing"
+guard "guard: missing token file prints setup-token" "claude setup-token"
+install -m 600 /dev/null "$tok"
+guard "guard: empty token file refused" "token file $tok is empty"
+echo sk-test > "$tok" && chmod 644 "$tok"
+guard "guard: mode 644 refused" "has mode 644, needs 600"
+chmod 600 "$tok"
+guard "guard: valid token passes" ""
+guard_env "$slot" 'DEVC_MOUNT_9=type=bind,source=${HOME}/.claude,target=/claude-seed,readonly'
+guard "guard: mount of ~/.claude refused" "mounts all of ~/.claude"
+guard_env "$slot" 'DEVC_MOUNT_9=type=bind,source=${HOME}/.claude/,target=/claude-seed,readonly'
+guard "guard: mount of ~/.claude/ refused" "mounts all of ~/.claude"
+guard_env "$slot" 'DEVC_MOUNT_9=type=bind,source=${HOME}/.cache/devcontainer/claude-seed,target=/claude-seed,readonly'
+guard "guard: staged seed mount passes" ""
+w="$tmp/wt"
+guard "guard: gen-config failure stops it" "is not a directory"
+
 printf '\n%d passed, %d failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ]

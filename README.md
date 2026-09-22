@@ -57,13 +57,20 @@ line). Then it verifies the masks and read-only overlays and opens zsh.
 4. **Claude Code config in git** (optional): `git init` in `~/.claude` with
    `snippets/claude-repo.gitignore` as `.gitignore`, so you can `git diff`
    what an agent changed inside a container.
-5. **Auth**: run `claude setup-token` on the host and save the token to
-   `~/.config/devcontainer/claude-oauth-token` (`chmod 600`). Slot 10 mounts
-   it read-only, and the image's `claude` wrapper exports it as
-   `CLAUDE_CODE_OAUTH_TOKEN`. The token lasts a year and never refreshes.
-   `.credentials.json` is not shared on purpose: its refresh token rotates on
-   every refresh, so copies on host and in containers log each other out.
-   Alternatively, run `claude login` in each container.
+5. **Auth (required)**: run `claude setup-token` on the host and save the
+   token to `~/.config/devcontainer/claude-oauth-token` (mode 600):
+
+   ```sh
+   install -m 600 /dev/stdin ~/.config/devcontainer/claude-oauth-token   # paste, Ctrl-D
+   ```
+
+   Slot 10 mounts it read-only at `/run/secrets/claude-oauth-token`, and the
+   image's `claude` wrapper exports it as `CLAUDE_CODE_OAUTH_TOKEN`. `devc up`
+   refuses to start without that slot, or if the file is missing, empty or
+   not mode 600, and prints the commands to fix it. The token lasts a year
+   and never refreshes. `.credentials.json` is not shared on purpose: its
+   refresh token rotates on every refresh, so copies on host and in
+   containers log each other out.
 
 The template uses the images at `ghcr.io/butzo/arch-dev`. To build your own,
 see [Your own images](#your-own-images).

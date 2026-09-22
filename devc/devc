@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# devc <recipe>: agent-isolation devcontainer for the repo in the current
+# directory. Recipes live in the host install, never in the repo.
+set -euo pipefail
+share=${DEVC_SHARE:-$HOME/.local/share/devc}
+exec just --justfile "$share/devc.just" --working-directory "$(pwd -P)" "$@"
