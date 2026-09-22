@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
-// Claudian "Claude CLI path" target: runs `claude` inside the vault's
-// devcontainer (project-template). The SDK spawns this via `node <path>`, so
+// Claudian "Claude CLI path" target: runs `claude` inside the vault's devc
+// container (`devc up`). The SDK spawns this via `node <path>`, so
 // it must stay a .js file. stdout carries stream-json: never write to it.
 
 const { spawnSync, spawn } = require('child_process');
@@ -32,14 +32,16 @@ const podman = (args) => {
 
 // --- preflight -------------------------------------------------------------
 // The devcontainer CLI labels containers with the host workspace path; with
-// path identity that is Claudian's cwd (or a parent of it).
+// path identity that is Claudian's cwd (or a parent of it). devc.managed
+// skips leftovers of the old in-repo template (podman ANDs label filters).
 const findContainer = () => {
   if (process.env.CLAUDIAN_CONTAINER) return process.env.CLAUDIAN_CONTAINER;
   for (let dir = cwd; ; dir = path.dirname(dir)) {
-    const r = podman(['ps', '-a', '-q', '--filter', `label=devcontainer.local_folder=${dir}`]);
+    const r = podman(['ps', '-a', '-q', '--filter', 'label=devc.managed=true',
+      '--filter', `label=devcontainer.local_folder=${dir}`]);
     const id = r.stdout.trim().split('\n')[0];
     if (id) return id;
-    if (dir === path.dirname(dir)) die(`no devcontainer for ${cwd}; run \`just up\` there first`);
+    if (dir === path.dirname(dir)) die(`no devc container for ${cwd}; run \`devc up\` there first`);
   }
 };
 

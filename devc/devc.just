@@ -75,8 +75,7 @@ _seed:
 # start-if-needed + check isolation + enter: the daily one
 dev: up verify-isolation enter
 
-# create or start the container (CLI output is shown only on failure);
-# restarts a running one whose file overlays went stale
+# create or start the container; restarts it if a file overlay went stale
 up: _guard _seed
     #!/usr/bin/env bash
     set -euo pipefail

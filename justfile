@@ -51,8 +51,13 @@ refresh-nvim-data:
         test -d ~/.local/share/nvim/lazy/lazy.nvim || \
         { echo "refresh-nvim-data: lazy.nvim missing from volume" >&2; exit 1; }'
 
-# install the Claudian wrapper (Obsidian's "Claude CLI path") into ~/.local/bin.
-# A copy, not a symlink: the host runs it, so edits here (possibly by an agent
-# in a devcontainer of this repo) only take effect when installed again.
-install-claudian:
+# run the devc tests, then install devc (~/.local/bin/devc + ~/.local/share/devc)
+# and the Claudian wrapper (Obsidian's "Claude CLI path"). Copies, not
+# symlinks: the host runs them, so edits here (possibly by an agent in a
+# devcontainer of this repo) only take effect when installed again.
+install:
+    devc/tests/run.sh
+    install -Dm755 devc/devc ~/.local/bin/devc
+    install -Dm755 -t ~/.local/share/devc devc/gen-config devc/post-create.sh
+    install -Dm644 -t ~/.local/share/devc devc/devc.just devc/base.json
     install -Dm755 claudian/claudian-podman.js ~/.local/bin/claudian-podman.js
