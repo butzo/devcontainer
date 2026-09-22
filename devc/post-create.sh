@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Runs once, inside the container, after creation.
+# post-create.sh <workspace>: runs once, inside the container, after creation.
+# Lives in the host devc install, mounted read-only at /opt/devc.
 set -euo pipefail
+workspace=${1:-$PWD}
 
 # --- Claude Code config: disposable per-container copy ---------------------
-# /claude-seed is the allowlisted copy `just up` stages from host ~/.claude
+# /claude-seed is the allowlisted copy `devc up` stages from host ~/.claude
 # (config only, incl. .git so `git status`/`git diff` inside shows what the
 # agent changed). The copy is disposable: to keep a change, redo it on the
 # host checkout and commit/push there (no credentials in here).
@@ -29,16 +31,18 @@ if [ ! -e "$HOME/.claude/.seeded" ] && [ -d /claude-seed ]; then
 You run inside a devcontainer that isolates confidential content.
 
 - `confidential/`, `.git/git-crypt/` and, in Obsidian vaults, `.claudian/` are
-  masked with empty mounts on purpose. They are not empty on the host. Do not
-  try to read, restore, decrypt or work around them.
+  masked with empty mounts on purpose, in every repo. They may not be empty on
+  the host. Do not try to read, restore, decrypt or work around them.
 - Because of the masks, `git status` lists their tracked files as deleted.
   These deletions are not real. Never stage or commit them.
 - Stage explicit paths only (`git add <path>...`). Never use `git add -A`,
   `git add .`, `git add -u` or `git commit -a`.
 - Before every commit, run `git diff --cached --name-status`. If it shows any
   `D` entry under a masked path, unstage it with `git restore --staged <path>`.
-- `.git/hooks`, `.git/config`, `.devcontainer/`, `justfile`, `.claude/` and
-  `.obsidian/` may be read-only on purpose. Do not work around that.
+- `.git/hooks`, `.git/config` and `.claude/` are read-only on purpose, and so
+  are `.devcontainer/`, `justfile` and `.obsidian/` where they exist. The host
+  executes them. `.claude/` is an empty read-only mount when the host has none.
+  Do not work around that.
 EOF
 
   touch "$HOME/.claude/.seeded"
@@ -53,13 +57,12 @@ if [ -f "$HOME/.claude/.credentials.json" ]; then
   echo "post-create: removed copied ~/.claude/.credentials.json (use the setup-token file)"
 fi
 if [ ! -r /run/secrets/claude-oauth-token ]; then
-  echo "post-create: NOTE no /run/secrets/claude-oauth-token; run \`claude login\` here or set it up on the host"
+  echo "post-create: NOTE no /run/secrets/claude-oauth-token (devc up should have refused); check the token slot in mounts.env"
 fi
 
 # --- Claude Code sandbox: container-local adjustments ----------------------
 # Both edits land in the container's copy of ~/.claude/settings.json only; the
 # host settings and the project's .claude/settings.json stay untouched.
-workspace=$(cd "$(dirname "$0")/.." && pwd)
 settings="$HOME/.claude/settings.json"
 [ -f "$settings" ] || echo '{}' > "$settings"
 
@@ -84,8 +87,9 @@ else
 fi
 
 # 2. The sandbox write-protects Claude Code's config paths, and for one that
-#    does not exist yet it creates a placeholder to mount over. devcontainer.json
-#    mounts the workspace .claude read-only, so that creation fails with
+#    does not exist yet it creates a placeholder to mount over. devc mounts the
+#    workspace .claude read-only (a bind, or an empty tmpfs if the host has
+#    none), so that creation fails with
 #    "Can't create file .../.claude/skills: Read-only file system". Naming the
 #    directory itself in denyWrite makes the sandbox skip its missing children
 #    ("already uncreatable") instead. Absolute path: `./` in user settings would
