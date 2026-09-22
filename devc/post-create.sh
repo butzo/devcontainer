@@ -64,6 +64,7 @@ fi
 # Both edits land in the container's copy of ~/.claude/settings.json only; the
 # host settings and the project's .claude/settings.json stay untouched.
 settings="$HOME/.claude/settings.json"
+mkdir -p "$HOME/.claude"  # absent when no /claude-seed was mounted
 [ -f "$settings" ] || echo '{}' > "$settings"
 
 # jq <args...> '<filter>' applied in place; non-zero (and untouched) on failure.
