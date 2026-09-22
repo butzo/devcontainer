@@ -54,6 +54,24 @@ if (state.stdout.trim() !== 'running') {
   if (start.status !== 0) die(`cannot start "${CONTAINER}": ${start.stderr.trim()}`);
 }
 
+// Stale file overlays: host git replaces .git/config by rename (editors may do
+// the same to justfile), which leaves the container's read-only bind over a
+// deleted inode and the path writable. Only `devc up` restarts to fix that:
+// restarting from here would kill a running agent session.
+const ws = podman(['container', 'inspect', '-f',
+  '{{index .Config.Labels "devcontainer.local_folder"}}', CONTAINER]).stdout.trim();
+if (!ws) die(`container "${CONTAINER}" has no devcontainer.local_folder label`);
+for (const p of ['.git/config', 'justfile']) {
+  const target = path.join(ws, p);
+  if (p !== '.git/config' && !fs.existsSync(target)) continue;
+  const m = podman(['exec', CONTAINER, 'findmnt', '-rno', 'OPTIONS', '-M', target]);
+  if (!m.stdout.trim()) {
+    die(`${p} was replaced on the host (git and some editors rewrite by rename), so its ` +
+        'read-only overlay no longer covers it and the agent could write it. ' +
+        `Run \`devc up\` in ${ws} to restart the container.`);
+  }
+}
+
 // Path identity: the vault must resolve to the same absolute path inside.
 if (podman(['exec', CONTAINER, 'test', '-d', cwd]).status !== 0) {
   die(`cwd not visible inside container: ${cwd}`);

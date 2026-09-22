@@ -75,9 +75,50 @@ _seed:
 # start-if-needed + check isolation + enter: the daily one
 dev: up verify-isolation enter
 
-# create or start the container (CLI output is shown only on failure)
+# create or start the container (CLI output is shown only on failure);
+# restarts a running one whose file overlays went stale
 up: _guard _seed
-    @out=$(devcontainer up {{ dc }} 2>&1) || { printf '%s\n' "$out" >&2; exit 1; }
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # A single-file bind pins an inode. Host git replaces .git/config by
+    # rename (config.lock), editors may do the same to justfile; the path then
+    # resolves to the new, writable file through the workspace mount. A
+    # restart binds the current file again; a recreate is not needed.
+    ws={{ quote(ws) }}
+    stale() {
+      for p in .git/config justfile; do
+        [ -e "$p" ] || continue
+        [ -n "$({{ engine }} exec "$1" findmnt -rno OPTIONS -M "$ws/$p" 2>/dev/null)" ] || echo "$p"
+      done
+    }
+    cid=$({{ engine }} ps --filter label=devc.managed=true --filter {{ this }} --filter status=running -q | head -n1) || true
+    if [ -n "$cid" ]; then
+      # A path that appeared after creation has no bind spec: restart can't
+      # help. (.claude is left out: absent at creation it is a read-only
+      # tmpfs, which covers a later host .claude too.)
+      specs=$({{ engine }} container inspect "$cid" | jq -r '.[0].Mounts[].Destination')
+      for p in .git/config justfile .obsidian .devcontainer; do
+        if [ -e "$p" ] && ! grep -qxF "$ws/$p" <<<"$specs"; then
+          printf '\033[31mERROR\033[0m %s has no read-only overlay (added after the container was created); run: devc rebuild\n' "$p" >&2
+          exit 1
+        fi
+      done
+    fi
+    restarted=
+    if [ -n "$cid" ] && gone=$(stale "$cid") && [ -n "$gone" ]; then
+      for p in $gone; do
+        printf '\033[33mNOTE\033[0m %s was replaced on the host (git and some editors rewrite by rename), so its\n' "$p" >&2
+        printf '     read-only overlay no longer covers it and the agent could write it.\n' >&2
+      done
+      printf '     Restarting the container to re-apply the overlay.\n' >&2
+      {{ engine }} restart "$cid" >/dev/null
+      restarted=1
+    fi
+    out=$(devcontainer up {{ dc }} 2>&1) || { printf '%s\n' "$out" >&2; exit 1; }
+    if [ -n "$restarted" ] && gone=$(stale "$cid") && [ -n "$gone" ]; then
+      printf '\033[31mERROR\033[0m still no read-only overlay after restart: %s\n' "$gone" >&2
+      exit 1
+    fi
 
 # open zsh in the running container
 enter:
