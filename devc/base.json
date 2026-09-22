@@ -1,0 +1,15 @@
+{
+  "name": "arch-dev",
+  "image": "ghcr.io/butzo/arch-dev:aio",
+  "remoteUser": "dev",
+  "updateRemoteUserUID": false,
+  "runArgs": [
+    "--userns=keep-id",
+    "--label", "devc.managed=true"
+  ],
+  "containerEnv": {
+    "TZ": "Europe/Berlin",
+    "TERM": "xterm-256color",
+    "DEVCONTAINER_NAME": "${localWorkspaceFolderBasename}"
+  }
+}

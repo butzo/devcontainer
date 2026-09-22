@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# gen-config <workspace>: print the devcontainer.json for one project.
+#
+# The single source of truth for what the container mounts. Masks and
+# read-only overlays follow what exists in the workspace right now, so
+# `devc up` regenerates the config every time. Paths are literal: each
+# generated config belongs to exactly one workspace.
+#
+#   DEVC_MOUNTS_ENV  personal mounts (default ~/.config/devcontainer/mounts.env)
+#   DEVC_SHARE       host install dir mounted at /opt/devc (default ~/.local/share/devc)
+set -euo pipefail
+
+die() { printf 'gen-config: %s\n' "$*" >&2; exit 1; }
+
+[ $# -eq 1 ] || die "usage: gen-config <workspace>"
+here=$(dirname "$(readlink -f "$0")")
+mounts_env=${DEVC_MOUNTS_ENV:-$HOME/.config/devcontainer/mounts.env}
+share=${DEVC_SHARE:-$HOME/.local/share/devc}
+
+ws=$(cd "$1" && pwd -P) || die "no such workspace: $1"
+# `,` separates --mount options and `:` separates -v fields; either in the
+# path would let it inject mount options.
+case "$ws" in *,* | *:*) die "workspace path contains ',' or ':': $ws" ;; esac
+[ -d "$ws/.git" ] || die "$ws/.git is not a directory (run devc in a repo root; worktrees are not supported)"
+for p in .git/hooks .git/config; do
+  [ -e "$ws/$p" ] || die "$ws/$p is missing (its read-only overlay needs a bind source)"
+done
+
+mounts=()
+# Masks: empty tmpfs over git-crypt plaintext and key in every repo, even
+# where absent, so a later confidential/ is covered from the first start.
+# notmpcopyup is essential: the default tmpcopyup copies the host files from
+# the workspace bind mount INTO the tmpfs, leaking them.
+mask()    { mounts+=("type=tmpfs,target=$ws/$1,notmpcopyup"); }
+# Read-only overlays: paths the HOST executes. Writable, they would let an
+# agent run code on the host, where the confidential plaintext lives.
+overlay() { mounts+=("type=bind,source=$ws/$1,target=$ws/$1,readonly"); }
+
+mask confidential
+mask .git/git-crypt
+overlay .git/hooks
+overlay .git/config
+if [ -e "$ws/.claude" ]; then
+  overlay .claude
+else
+  # Nothing to protect yet, but the agent must not create host Claude Code
+  # settings or hooks either. Leaves an empty .claude/ mountpoint on the host.
+  mounts+=("type=tmpfs,target=$ws/.claude,notmpcopyup,readonly")
+fi
+if [ -e "$ws/.obsidian" ]; then
+  # Obsidian vault: plugin code Obsidian loads, and Claudian's transcripts
+  # (may hold confidential notes attached in the host UI).
+  overlay .obsidian
+  mask .claudian
+fi
+# A repo's own devcontainer is never read by devc, but still host-executable.
+if [ -e "$ws/.devcontainer" ]; then overlay .devcontainer; fi
+if [ -e "$ws/justfile" ]; then overlay justfile; fi
+mounts+=("type=bind,source=$share,target=/opt/devc,readonly")
+
+# Personal mounts, in slot order. Sourced with sh semantics so ${HOME}
+# expands on the host; values go verbatim to `podman run --mount`.
+if [ -f "$mounts_env" ]; then
+  while IFS= read -r m; do mounts+=("$m"); done < <(
+    set -a
+    # shellcheck disable=SC1090
+    . "$mounts_env"
+    env | sed -nE 's/^DEVC_MOUNT_([0-9]+)=(.*)$/\1 \2/p' | sort -n | cut -d' ' -f2-
+  )
+else
+  printf '\033[33mNOTE\033[0m no %s, no personal mounts\n' "$mounts_env" >&2
+fi
+
+# Path identity: the workspace sits at its host path inside the container, so
+# absolute paths in tool output (e.g. from Claudian) resolve on the host.
+printf '%s\n' "${mounts[@]}" | jq -R . | jq -s \
+  --slurpfile base "$here/base.json" --arg ws "$ws" '
+  $base[0] + {
+    workspaceMount: "type=bind,source=\($ws),target=\($ws)",
+    workspaceFolder: $ws,
+    mounts: .,
+    postCreateCommand: ["/opt/devc/post-create.sh", $ws]
+  }'
