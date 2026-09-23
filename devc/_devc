@@ -1,0 +1,24 @@
+#compdef devc
+
+# devc has no completion of its own to hook into: it execs `just` under a
+# fixed justfile (see devc), but just's own zsh completion is keyed to the
+# literal command name `just`, so it never fires here. This instead lists
+# devc.just's public recipes directly; `just --list` already hides the
+# `_`-prefixed private ones, so no filtering is needed.
+_devc() {
+  (( CURRENT == 2 )) || return 1
+  local share=${DEVC_SHARE:-$HOME/.local/share/devc}
+  local -a specs
+  local line name desc
+  while IFS= read -r line; do
+    [[ $line == '    '* ]] || continue
+    line=${line#    }
+    name=${line%% *}
+    desc=${line#*"#" }
+    [[ $line == *'#'* ]] || desc=''
+    specs+=("${name}:${desc}")
+  done < <(just --justfile "$share/devc.just" --list --unsorted 2>/dev/null)
+  _describe 'devc recipe' specs
+}
+
+_devc "$@"

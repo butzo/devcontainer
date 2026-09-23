@@ -60,4 +60,5 @@ install:
     install -Dm755 devc/devc ~/.local/bin/devc
     install -Dm755 -t ~/.local/share/devc devc/gen-config devc/post-create.sh
     install -Dm644 -t ~/.local/share/devc devc/devc.just devc/base.json
+    install -Dm644 devc/_devc ~/.local/share/devc/_devc
     install -Dm755 claudian/claudian-podman.js ~/.local/bin/claudian-podman.js
