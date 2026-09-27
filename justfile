@@ -39,15 +39,18 @@ prune:
 # install nvim plugins and treesitter parsers into the nvim-data volume,
 # which containers mount read-only; rerun after changing the nvim config.
 # keep-id matches the devcontainer's UID mapping; the chown fixes a volume root
-# that podman created as root. nvim exits 0 even when the bootstrap clone
-# fails, hence the explicit check.
+# that podman created as root. Missing parsers are installed by the nvim config
+# itself (it waits when headless); update() rebuilds existing ones for the
+# restored plugin commit. nvim exits 0 even when the bootstrap clone fails,
+# hence the explicit check.
 refresh-nvim-data:
     podman run --rm --userns=keep-id \
       -v nvim-data:/home/dev/.local/share/nvim \
       -v ~/.config/nvim:/home/dev/.config/nvim:ro \
       {{registry}}/arch-dev:aio \
       sh -c 'sudo chown -R dev:dev ~/.local/share/nvim && \
-        nvim --headless "+Lazy! restore" "+TSUpdateSync" +qa && \
+        nvim --headless "+Lazy! restore" \
+          "+lua require(\"nvim-treesitter\").update():wait(300000)" +qa && \
         test -d ~/.local/share/nvim/lazy/lazy.nvim || \
         { echo "refresh-nvim-data: lazy.nvim missing from volume" >&2; exit 1; }'
 

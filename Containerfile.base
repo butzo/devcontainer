@@ -25,6 +25,8 @@ RUN echo "cache-bust: ${CACHE_BUST}" && \
       tinymist marksman yaml-language-server taplo-cli bash-language-server \
       vscode-json-languageserver shellcheck shfmt stylua typstyle prettier \
       systemd-lsp \
+      # nvim-treesitter (main branch) compiles parsers with it
+      tree-sitter-cli \
       # rustup ships only shims here — no toolchain, so base stays toolchain-free.
       # aio installs the toolchain + the rust-analyzer component. The repo
       # rust-analyzer is not usable: it depends on rust-src -> rust, which drags
