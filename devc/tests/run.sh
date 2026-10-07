@@ -61,6 +61,19 @@ check "plain: post-create from /opt/devc" '.postCreateCommand == ["/opt/devc/pos
 check "plain: no security options" \
   '[.runArgs[] | select(test("security-opt|cap-add|privileged|unmask|systempaths"))] == []
    and (has("privileged") | not) and (has("capAdd") | not) and (has("securityOpt") | not)'
+# Podman creates a missing tmpfs target itself, owned by nobody; the host user
+# then cannot write it (Claudian keeps its settings in .claudian/).
+# owned <name> <path...>: each path must be a directory owned by the caller
+owned() {
+  local name=$1 p; shift
+  for p in "$@"; do
+    if [ ! -d "$p" ]; then bad "$name" "$p is not a directory"; return; fi
+    if [ "$(stat -c %u "$p")" != "$(id -u)" ]; then bad "$name" "$p not owned by $(id -u)"; return; fi
+  done
+  ok "$name"
+}
+owned "plain: tmpfs targets pre-created, owned by the user" \
+  "$w/confidential" "$w/.git/git-crypt" "$w/.claude"
 
 # --- repo with .claude and justfile -------------------------------------------
 w=$(repo claude)
@@ -79,6 +92,7 @@ generates "vault: exits 0" "$w"
 check "vault: .obsidian read-only bind" \
   '.mounts | index("type=bind,source=\($w)/.obsidian,target=\($w)/.obsidian,readonly") != null'
 check "vault: .claudian masked" '.mounts | index("type=tmpfs,target=\($w)/.claudian,notmpcopyup") != null'
+owned "vault: .claudian pre-created, owned by the user" "$w/.claudian"
 
 # --- repo with its own .devcontainer ------------------------------------------
 w=$(repo owndc)

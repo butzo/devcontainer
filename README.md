@@ -21,24 +21,24 @@ claudian/             wrapper that runs Obsidian Claudian's agent in a project's
 
 ## Quick start
 
-After the [one-time setup](#one-time-setup):
+Setting up a new project, after the [one-time setup](#one-time-setup):
 
-```sh
-cd ~/projects/foo
-devc dev
-```
-
-The project must be a git repository (`.git` a directory, not a worktree),
-and its path must not contain `,` or `:`. Nothing is added to the repo except
-empty mountpoint directories that podman leaves behind (`confidential/`,
-`.claude/` where they were absent); `devc` ignores any `.devcontainer/` the
-repo has.
+1. Make it a git repository: `git init` is enough. `.git` must be a directory
+   (no worktrees) and the path must not contain `,` or `:`.
+2. Obsidian vault? Open it in Obsidian and install Claudian first, so
+   `.obsidian/` exists before the container is created (see [Claudian](#claudian)).
+3. In the project root: `devc dev`.
 
 The first `devc dev` stages your Claude Code config, generates the project's
 devcontainer.json in `~/.cache/devc/<id>/`, pulls the image, creates the
 container and runs `post-create.sh`: it copies the staged config in, fills the
 tldr cache and checks that bwrap works (look for its `OK` or `WARNING` line).
 Then it verifies the masks and read-only overlays and opens zsh.
+
+Nothing is added to the repo except the empty directories the masks need
+(`confidential/`, `.git/git-crypt/`, `.claude/`, `.claudian/` in a vault),
+created as you so the host can still write them. `devc` ignores any
+`.devcontainer/` the repo has.
 
 ## One-time setup
 
@@ -205,7 +205,7 @@ Claudian is an Obsidian plugin that runs Claude Code from inside a vault.
 `claudian/claudian-podman.js` runs that agent inside the vault's devc container
 instead of on the host:
 
-1. `devc up` in the vault (see Obsidian vaults above).
+1. `devc up` in the vault (see [Quick start](#quick-start)).
 2. `just install` in this repo.
 3. In Claudian's settings, set the Claude CLI path to
    `~/.local/bin/claudian-podman.js` (absolute) and restart Obsidian.

@@ -31,7 +31,11 @@ mounts=()
 # where absent, so a later confidential/ is covered from the first start.
 # notmpcopyup is essential: the default tmpcopyup copies the host files from
 # the workspace bind mount INTO the tmpfs, leaking them.
-mask()    { mounts+=("type=tmpfs,target=$ws/$1,notmpcopyup"); }
+# A missing tmpfs target is created here, as the user: left to podman it
+# comes out owned by nobody, and the host can no longer write it (Claudian
+# keeps its settings in .claudian/, git-crypt its keys in .git/git-crypt/).
+tmpfs()   { mkdir -p "$ws/$1"; mounts+=("type=tmpfs,target=$ws/$1,notmpcopyup$2"); }
+mask()    { tmpfs "$1" ""; }
 # Read-only overlays: paths the HOST executes. Writable, they would let an
 # agent run code on the host, where the confidential plaintext lives.
 overlay() { mounts+=("type=bind,source=$ws/$1,target=$ws/$1,readonly"); }
@@ -45,7 +49,7 @@ if [ -e "$ws/.claude" ]; then
 else
   # Nothing to protect yet, but the agent must not create host Claude Code
   # settings or hooks either. Leaves an empty .claude/ mountpoint on the host.
-  mounts+=("type=tmpfs,target=$ws/.claude,notmpcopyup,readonly")
+  tmpfs .claude ,readonly
 fi
 if [ -e "$ws/.obsidian" ]; then
   # Obsidian vault: plugin code Obsidian loads, and Claudian's transcripts
