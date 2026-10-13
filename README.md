@@ -221,6 +221,30 @@ in Claudian's environment settings to log what it runs.
 Context Claudian attaches in the Obsidian UI (the open note, @mentions,
 selections) comes from the host and bypasses the container.
 
+### Chat history across restarts
+
+Claudian keeps only prompts and session ids in `.claudian/`; the transcript is
+Claude Code's own `projects/<encoded cwd>/<session>.jsonl`, which the Obsidian
+process reads from the host, never through the CLI. With the wrapper, that file
+is written inside the container, so after a restart Claudian finds no
+transcript, drops the session id and starts the chat over. To keep history:
+
+1. `mkdir -m 700 -p ~/.local/share/devc/claude-home/projects` (outside any
+   vault; it holds every container's transcripts).
+2. Add the `DEVC_MOUNT_11` slot from `snippets/mounts.env`, which binds that
+   dir at `/claude-projects`; post-create links `~/.claude/projects` to it
+   (a bind straight under `~/.claude` would make podman create `~/.claude`
+   as root before post-create runs). Then `just install` here and
+   `devc rebuild` the vault.
+3. In Claudian's Claude environment variables, set
+   `CLAUDE_CONFIG_DIR=/home/<you>/.local/share/devc/claude-home` (absolute).
+   Claudian resolves transcripts through it; the wrapper does not forward it
+   into the container, where it would move `claude` off the seeded
+   `/home/dev/.claude`. Changing the variable resets resume state once.
+
+The seed's own `projects/` exclusion is unaffected: this directory never
+contains the host's `~/.claude/projects`.
+
 ## Security model
 
 - **podman** bounds the project: only the workspace and the read-only mounts

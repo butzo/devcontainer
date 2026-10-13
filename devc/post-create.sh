@@ -49,6 +49,21 @@ EOF
   echo "post-create: seeded ~/.claude from /claude-seed (allowlisted, disposable)"
 fi
 
+# Transcripts on the host (optional, mounts.env): a bind at /claude-projects
+# becomes ~/.claude/projects so Claudian can read them. Mounting it under
+# ~/.claude directly would make podman create ~/.claude as root first.
+if mountpoint -q /claude-projects; then
+  mkdir -p "$HOME/.claude"
+  if [ -d "$HOME/.claude/projects" ] && [ ! -L "$HOME/.claude/projects" ]; then
+    rmdir "$HOME/.claude/projects" 2>/dev/null \
+      || echo "post-create: WARNING ~/.claude/projects exists and is not empty; not linking /claude-projects"
+  fi
+  if [ ! -e "$HOME/.claude/projects" ] || [ -L "$HOME/.claude/projects" ]; then
+    ln -sfn /claude-projects "$HOME/.claude/projects"
+    echo "post-create: ~/.claude/projects -> /claude-projects (host-visible transcripts)"
+  fi
+fi
+
 # Auth comes from /run/secrets/claude-oauth-token (see the claude wrapper in
 # the image). A copied .credentials.json (older seeds) shares the host's
 # rotating refresh token and logs host or container out, so drop it.

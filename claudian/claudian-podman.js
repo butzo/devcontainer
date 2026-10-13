@@ -84,9 +84,14 @@ if (podman(['exec', CONTAINER, 'test', '-d', cwd]).status !== 0) {
 // the values from its own env, so tokens stay out of argv (visible in ps).
 const ENV_PREFIXES = [/^CLAUDE_/, /^ANTHROPIC_/];
 const ENV_EXACT = ['LANG', 'LC_ALL', 'TERM'];
+// Host-only: Claudian reads transcripts from $CLAUDE_CONFIG_DIR/projects on
+// the host (a bind of the container's ~/.claude/projects, see README). Inside,
+// it would move claude off the seeded /home/dev/.claude.
+const ENV_HOST_ONLY = ['CLAUDE_CONFIG_DIR'];
 
 const envNames = Object.keys(process.env)
-  .filter(k => ENV_PREFIXES.some(re => re.test(k)) || ENV_EXACT.includes(k));
+  .filter(k => ENV_PREFIXES.some(re => re.test(k)) || ENV_EXACT.includes(k))
+  .filter(k => !ENV_HOST_ONLY.includes(k));
 
 // --- exec ------------------------------------------------------------------
 const args = [
