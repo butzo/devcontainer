@@ -56,6 +56,16 @@ if [ -e "$ws/.obsidian" ]; then
   # (may hold confidential notes attached in the host UI).
   overlay .obsidian
   mask .claudian
+  # Obsidian bridge: the host listener's socket dir (see bridge/obsidian-bridge),
+  # keyed like ~/.cache/devc/<id>. Read-write: connect() needs write permission
+  # on the socket, and a read-only bind refuses it with EROFS. The dir holds
+  # only the socket; pid and log live one level up, outside the mount. A dir
+  # bind survives the socket being recreated (a file bind would pin the inode).
+  rt=${XDG_RUNTIME_DIR:-}
+  [ -n "$rt" ] || die "XDG_RUNTIME_DIR unset (the Obsidian bridge socket lives under it)"
+  id=$(printf %s "$ws" | sha256sum | cut -c1-16)
+  install -d -m 700 "$rt/obsidian-bridge" "$rt/obsidian-bridge/$id" "$rt/obsidian-bridge/$id/run"
+  mounts+=("type=bind,source=$rt/obsidian-bridge/$id/run,target=/run/obsidian-bridge")
 fi
 # A repo's own devcontainer is never read by devc, but still host-executable.
 if [ -e "$ws/.devcontainer" ]; then overlay .devcontainer; fi

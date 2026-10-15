@@ -79,6 +79,25 @@ if (podman(['exec', CONTAINER, 'test', '-d', cwd]).status !== 0) {
   die(`cwd not visible inside container: ${cwd}`);
 }
 
+// Obsidian bridge: the host listener behind `obsidian rename|move` inside
+// (see README). Started from here because this process has Obsidian's session
+// environment, which the Obsidian CLI needs (a display). A failure only
+// disables renames, so it is reported, not fatal.
+if (fs.existsSync(path.join(ws, '.obsidian'))) {
+  const share = process.env.DEVC_SHARE
+    || path.join(require('os').homedir(), '.local', 'share', 'devc');
+  const b = spawnSync(path.join(share, 'obsidian-bridge'), ['ensure', ws], { encoding: 'utf8' });
+  const said = (b.stderr || '').trim();
+  if (b.error || b.status !== 0) {
+    const why = b.error ? b.error.message : said;
+    log('obsidian-bridge ensure failed:', why);
+    process.stderr.write(`claudian-podman: Obsidian bridge not started (${why}); \`obsidian rename\` inside will fail\n`);
+  } else if (said) {
+    log('obsidian-bridge:', said);
+    process.stderr.write(`${said}\n`);
+  }
+}
+
 // --- environment -----------------------------------------------------------
 // Forward only what the SDK sets. Never --env-host. Names only: podman reads
 // the values from its own env, so tokens stay out of argv (visible in ps).

@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# obsidian (devc bridge client): runs inside the container as
+# /usr/local/bin/obsidian. A subset of the Obsidian CLI, executed on the host
+# by bridge/obsidian-bridge over the socket gen-config mounts at
+# /run/obsidian-bridge. Same key=value syntax as the real CLI.
+set -euo pipefail
+
+sock=${OBSIDIAN_BRIDGE_SOCK:-/run/obsidian-bridge/sock}
+
+usage() {
+  cat <<'EOF'
+obsidian (devc bridge): rename or move notes so Obsidian updates their links.
+Only these commands reach the host; everything else is refused there.
+
+  obsidian rename path=<vault-relative file> name=<new name>
+  obsidian move   path=<vault-relative file> to=<folder or new path>
+  obsidian ping
+  obsidian help
+
+path= is exact and relative to the vault root (quote names with spaces).
+The destination folder of a move must exist: `mkdir -p` it first (a folder is
+a plain directory). Paths under .obsidian/, .claudian/, confidential/, .git/, .claude/,
+.devcontainer/ and .trash/ are refused. Never `mv` a note: Obsidian sees a
+delete and a create, and its links break.
+EOF
+}
+
+err() { printf 'obsidian: %s\n' "$*" >&2; }
+
+cmd=${1:-help}
+[ $# -eq 0 ] || shift
+case "$cmd" in help | -h | --help) usage; exit 0 ;; esac
+
+for a in "$@"; do
+  case "$a" in
+    *=*) ;;
+    *) err "expected key=value, got: $a"; exit 2 ;;
+  esac
+  case "$a" in *$'\n'*) err "newline in argument"; exit 2 ;; esac
+done
+
+if [ ! -S "$sock" ]; then
+  err "bridge socket $sock not found; on the host run \`devc up\` in the vault"
+  exit 2
+fi
+
+# One request per connection; the blank line ends it. -t keeps the connection
+# open after stdin's EOF while the host runs Obsidian.
+if ! out=$(printf '%s\n' "$cmd" "$@" '' | socat -t 60 - "UNIX-CONNECT:$sock" 2>&1); then
+  err "bridge not answering at $sock; on the host run \`devc up\` in the vault"
+  printf '%s\n' "$out" >&2
+  exit 2
+fi
+status=$(sed -n 's/^__status=//p' <<< "$out" | tail -n1)
+if [ -z "$status" ]; then
+  err "malformed bridge response"
+  printf '%s\n' "$out" >&2
+  exit 2
+fi
+grep -v '^__status=' <<< "$out" || true
+exit "$status"

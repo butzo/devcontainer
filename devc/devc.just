@@ -17,6 +17,8 @@ seed_dir := "~/.cache/devcontainer/claude-seed"
 seed_allow := ".git .gitignore CLAUDE.md settings.json AGENTS.md plugin.json marketplace.json agents commands ecc hooks plugins rules scripts skills"
 dc := "--docker-path " + engine + " --workspace-folder " + quote(ws) + " --config " + quote(cfg)
 this := quote("label=devcontainer.local_folder=" + ws)
+# Obsidian bridge (vaults): host listener behind `obsidian rename|move` inside
+bridge := quote(justfile_directory() / "obsidian-bridge")
 
 # list recipes
 _default:
@@ -102,6 +104,10 @@ up: _guard _seed
           exit 1
         fi
       done
+      if [ -e .obsidian ] && ! grep -qxF /run/obsidian-bridge <<<"$specs"; then
+        printf '\033[31mERROR\033[0m /run/obsidian-bridge is not mounted (container created before the Obsidian bridge); run: devc rebuild\n' >&2
+        exit 1
+      fi
     fi
     restarted=
     if [ -n "$cid" ] && gone=$(stale "$cid") && [ -n "$gone" ]; then
@@ -118,14 +124,22 @@ up: _guard _seed
       printf '\033[31mERROR\033[0m still no read-only overlay after restart: %s\n' "$gone" >&2
       exit 1
     fi
+    # The listener needs this shell's session (the Obsidian CLI wants a display).
+    # The container is up either way: a missing CLI or socat only costs renames.
+    if [ -e .obsidian ] && ! {{ bridge }} ensure "$ws"; then
+      printf '\033[33mWARN\033[0m Obsidian bridge not started; `obsidian rename` inside will fail\n' >&2
+    fi
 
 # open zsh in the running container
 enter:
     @devcontainer exec {{ dc }} zsh
 
-# stop the container (its state is kept)
+# stop the container (its state is kept) and, in a vault, the Obsidian bridge
 stop:
+    #!/usr/bin/env bash
+    set -euo pipefail
     {{ engine }} ps --filter label=devc.managed=true --filter {{ this }} -q | xargs -r {{ engine }} stop
+    if [ -e .obsidian ]; then {{ bridge }} stop {{ quote(ws) }}; fi
 
 # recreate the container (picks up a new image, new overlays, changed mounts.env)
 rebuild: _guard _seed
@@ -157,7 +171,11 @@ verify-isolation:
       for p in confidential .git/git-crypt; do mask "$p"; done; \
       for p in .git/hooks .git/config .claude; do ro "$PWD/$p"; done; \
       for p in .devcontainer justfile; do if [ -e "$p" ]; then ro "$PWD/$p"; fi; done; \
-      if [ -e .obsidian ]; then ro "$PWD/.obsidian"; mask .claudian; fi; \
+      if [ -e .obsidian ]; then ro "$PWD/.obsidian"; mask .claudian; \
+        if [ "$(obsidian ping 2>/dev/null | head -n1)" = pong ]; then ok "obsidian bridge answers"; \
+        else warn "obsidian bridge not answering (on the host: devc up in the vault)"; fi; \
+        extra=$(ls -A /run/obsidian-bridge 2>/dev/null | grep -vx sock || true); \
+        if [ -n "$extra" ]; then warn "/run/obsidian-bridge holds more than the socket: $extra"; fi; fi; \
       ro /opt/devc; \
       if [ -s /run/secrets/claude-oauth-token ]; then ok "OAuth token mounted"; else fail "no OAuth token at /run/secrets/claude-oauth-token"; fi; \
       for d in projects file-history session-data backups; do \

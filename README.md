@@ -17,6 +17,7 @@ justfile              local image builds, `just install`
 devc/                 host launcher, recipes, config generator, post-create, tests
 snippets/             host-side config: mounts, Claude Code settings
 claudian/             wrapper that runs Obsidian Claudian's agent in a project's devc container
+bridge/               Obsidian bridge: `obsidian rename|move` inside a vault's container, run by the host
 ```
 
 ## Quick start
@@ -43,13 +44,13 @@ created as you so the host can still write them. `devc` ignores any
 ## One-time setup
 
 1. **Install the tools** on the host: podman, [just](https://github.com/casey/just),
-   jq, rsync and the devcontainer CLI (AUR `devcontainer-cli` or
-   `npm i -g @devcontainers/cli`).
+   jq, rsync, socat (the [Obsidian bridge](#obsidian-bridge)) and the
+   devcontainer CLI (AUR `devcontainer-cli` or `npm i -g @devcontainers/cli`).
 2. **Install devc**: `just install` in this repo. It runs `devc/tests/run.sh`,
-   then copies `devc` to `~/.local/bin`, its recipes, generator and
-   post-create to `~/.local/share/devc`, and the Claudian wrapper to
-   `~/.local/bin`. Copies, not symlinks: the host runs them, so a change here
-   takes effect only after the next `just install`.
+   then copies `devc` to `~/.local/bin`, its recipes, generator, post-create
+   and the Obsidian bridge to `~/.local/share/devc`, and the Claudian wrapper
+   to `~/.local/bin`. Copies, not symlinks: the host runs them, so a change
+   here takes effect only after the next `just install`.
 3. **Personal mounts**: copy `snippets/mounts.env` to
    `~/.config/devcontainer/mounts.env` and keep it in your dotfiles. Each
    `DEVC_MOUNT_n` becomes one mount of the generated config, in slot order;
@@ -93,7 +94,7 @@ devc uses the images at `ghcr.io/butzo/arch-dev`. To build your own, see
 | `devc up`               | stage the Claude Code config, regenerate the config, create or start the container |
 | `devc enter`            | open zsh in the running container                                                  |
 | `devc verify-isolation` | check masks are empty tmpfs and overlays are read-only                             |
-| `devc stop`             | stop the container; its state is kept                                              |
+| `devc stop`             | stop the container (state kept) and, in a vault, the Obsidian bridge               |
 | `devc rebuild`          | recreate the container (new image, new overlays, changed mounts.env)               |
 | `devc update`           | pull the newest image, then `rebuild`                                              |
 | `devc raw-enter`        | `podman exec` straight in if the devcontainer CLI misbehaves                       |
@@ -171,6 +172,7 @@ code on the host, where the plaintext lives.
 | `.git/hooks`, `.git/config`           | always (host git and obsidian-git run them)                |
 | `.claude/`                            | always; an empty read-only tmpfs if the project has none   |
 | `.obsidian/` + mask over `.claudian/` | if `.obsidian/` exists (Obsidian vault)                    |
+| `/run/obsidian-bridge/` (read-write)  | if `.obsidian/` exists: the bridge socket, nothing else    |
 | `.devcontainer/`                      | if it exists (devc never reads it, but other tools run it) |
 | `justfile`                            | if it exists (host runs its recipes)                       |
 | `~/.local/share/devc` at `/opt/devc`  | always (post-create runs from there)                       |
@@ -245,6 +247,59 @@ transcript, drops the session id and starts the chat over. To keep history:
 The seed's own `projects/` exclusion is unaffected: this directory never
 contains the host's `~/.claude/projects`.
 
+## Obsidian bridge
+
+A plain `mv` of a note is a delete and a create to Obsidian, and its links
+break. Obsidian's CLI renames through the app and updates links, but it is the
+Electron binary talking to the running app, needs a display, and can `eval`
+JavaScript in it, so it stays on the host. The bridge gives the container two
+of its commands:
+
+```sh
+obsidian rename path="Notes/Old name.md" name="New name"
+obsidian move   path="Notes/New name.md" to=Archive   # folder must exist: mkdir -p it first
+obsidian ping                      # bridge reachable?
+```
+
+Same `key=value` syntax as the real CLI, `path=` only (exact, vault-relative,
+canonical: no `./`, `//` or trailing `/`). Everything else is refused on the
+host: other commands, other keys (`file=` resolves like a wikilink and is
+ambiguous), `..`, absolute paths, hidden names, and any path under
+`.obsidian/`, `.claudian/`, `confidential/`, `.git/`, `.claude/`,
+`.devcontainer/` or `.trash/`, because the host end acts where the git-crypt
+plaintext and the host-executed files live. Paths are also resolved on the
+host and must land where they say: the container can plant a symlink such as
+`notes/c -> ../confidential`, and the masks that hide `confidential/` inside
+do not exist on the host. (The check runs right before the CLI; the window
+between is the container's to race, as with any check on a tree it controls.)
+Every request is pinned to the container's own vault (`vault=<folder name>`),
+serialized (one Electron CLI call at a time, at most 8 connections) and logged
+to `$XDG_RUNTIME_DIR/obsidian-bridge/<id>/log` (capped, one rotation).
+
+How it works: in a vault, gen-config binds a per-vault directory from
+`$XDG_RUNTIME_DIR/obsidian-bridge/<id>/` read-write at `/run/obsidian-bridge`
+(read-write because connecting to a socket needs write permission; the
+directory holds only the socket). `bridge/obsidian-bridge ensure` on the host
+starts a `socat` listener there that runs the allowlist per connection.
+`devc up` and the Claudian wrapper both run `ensure`: the listener needs a
+session with a display, which those two have and a systemd user service would
+not. It dies with your session and comes back on the next of either; a
+listener started under a display that has since gone away keeps answering
+`ping` but fails renames until `devc stop` or a logout. A failed `ensure`
+(no socat, no CLI) is a warning in both: the container runs, renames do not.
+`devc stop` stops it. Inside, post-create installs `bridge/obsidian-client` as
+`/usr/local/bin/obsidian`, allows the socket in the sandbox, and tells the
+agent in the container's `CLAUDE.md` to use it instead of `mv`.
+`devc verify-isolation` warns when the bridge does not answer.
+
+Requirements: Obsidian 1.12.7+ with the CLI enabled (Settings → General →
+Command line interface), the vault open in Obsidian (an unopened vault gets a
+window), and Settings → Files and links → **Automatically update internal
+links** on; `ensure` warns if `.obsidian/app.json` lacks it. The CLI addresses
+vaults by folder name, so two vaults with the same folder name are ambiguous
+to it. The CLI exits 0 on errors; the bridge treats its `Error:` lines as
+failure (`obsidian` inside exits 1).
+
 ## Security model
 
 - **podman** bounds the project: only the workspace and the read-only mounts
@@ -258,6 +313,10 @@ contains the host's `~/.claude/projects`.
   including devc itself (`/opt/devc`, installed by copy).
 - **Git**: your identity is mounted read-only, so commits work. SSH keys and
   the agent never enter the container; push from the host.
+- **Obsidian bridge**: the one channel that runs something on the host for
+  the container, allowlisted to `rename` and `move` inside the container's own
+  vault, with the masked and read-only paths refused (see
+  [Obsidian bridge](#obsidian-bridge)).
 - **Claude Code config**: `devc up` stages an allowlist of host `~/.claude`
   (`settings.json`, `CLAUDE.md`, agents, commands, hooks,
   plugins, rules, skills, `.git`, ...) into `~/.cache/devcontainer/claude-seed`,

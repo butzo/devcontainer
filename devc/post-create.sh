@@ -44,6 +44,17 @@ You run inside a devcontainer that isolates confidential content.
   executes them. `.claude/` is an empty read-only mount when the host has none.
   Do not work around that.
 EOF
+  if [ -d /run/obsidian-bridge ]; then
+    cat >> "$HOME/.claude/CLAUDE.md" <<'EOF'
+- This is an Obsidian vault. Rename or move notes only with
+  `obsidian rename path=<file> name=<new name>` or
+  `obsidian move path=<file> to=<folder or path>`: a devc bridge to the
+  host's Obsidian, which updates the links. Never `mv` or `git mv` a note;
+  Obsidian sees a delete and a create, and its links break. The destination
+  folder of a move must exist (`mkdir -p` it first). `obsidian help` lists
+  the subset.
+EOF
+  fi
 
   touch "$HOME/.claude/.seeded"
   echo "post-create: seeded ~/.claude from /claude-seed (allowlisted, disposable)"
@@ -117,6 +128,24 @@ if findmnt -rno OPTIONS -M "$workspace/.claude" 2>/dev/null | grep -qw ro; then
   else
     echo "post-create: WARNING — could not add $workspace/.claude to" \
          "sandbox.filesystem.denyWrite; sandboxed commands will fail" >&2
+  fi
+fi
+
+# 3. Obsidian bridge (vaults): gen-config binds the host listener's socket dir
+#    at /run/obsidian-bridge. Sandboxed commands may connect to the socket, and
+#    the client goes on PATH as `obsidian` (the CLI's syntax, rename/move only).
+if [ -d /run/obsidian-bridge ]; then
+  if edit_settings '.sandbox.network.allowUnixSockets = (((.sandbox.network.allowUnixSockets // []) + ["/run/obsidian-bridge/sock"]) | unique)'; then
+    echo "post-create: sandbox allowUnixSockets += /run/obsidian-bridge/sock (Obsidian bridge)"
+  else
+    echo "post-create: WARNING — could not allow /run/obsidian-bridge/sock in the sandbox;" \
+         "\`obsidian rename\` will fail in sandboxed commands" >&2
+  fi
+  if err=$(sudo -n install -m 755 /opt/devc/obsidian-client /usr/local/bin/obsidian 2>&1); then
+    echo "post-create: installed /usr/local/bin/obsidian (bridge client)"
+  else
+    echo "post-create: WARNING — could not install /usr/local/bin/obsidian (bridge client): $err" >&2
+    echo "  inside the container: sudo install -m 755 /opt/devc/obsidian-client /usr/local/bin/obsidian" >&2
   fi
 fi
 
